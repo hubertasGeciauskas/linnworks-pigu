@@ -1,9 +1,9 @@
 name: Generate Pigu Feed
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "0 */3 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: "9"
 
       - name: Install dependencies
         working-directory: feed-generator
@@ -43,7 +43,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add feed-generator/public/feed.xml
-          git diff --cached --quiet || git commit -m "chore: update feed.xml [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git diff --cached --quiet || git commit -m "chore: update feed.xml"
           git push
-
-          
