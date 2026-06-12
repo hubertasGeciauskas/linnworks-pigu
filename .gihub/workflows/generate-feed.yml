@@ -45,3 +45,5 @@ jobs:
           git add feed-generator/public/feed.xml
           git diff --cached --quiet || git commit -m "chore: update feed.xml [$(date -u '+%Y-%m-%d %H:%M UTC')]"
           git push
+
+          
