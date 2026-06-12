@@ -2,20 +2,20 @@
   "collectionHours": 24,
   "countries": {
     "lt": {
-      "source": "PIGU",
-      "subSource": "pigu_lt"
+      "source": "SHOPIFY",
+      "subSource": "goMilitar"
     },
     "lv": {
-      "source": "PIGU",
-      "subSource": "pigu_lv"
+      "source": "SHOPIFY",
+      "subSource": "goMilitar"
     },
     "ee": {
-      "source": "PIGU",
-      "subSource": "pigu_ee"
+      "source": "SHOPIFY",
+      "subSource": "goMilitar"
     },
     "fi": {
-      "source": "PIGU",
-      "subSource": "pigu_fi"
+      "source": "SHOPIFY",
+      "subSource": "goMilitar"
     }
   },
   "discountRules": {
