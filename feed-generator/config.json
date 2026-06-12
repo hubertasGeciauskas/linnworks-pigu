@@ -1,0 +1,26 @@
+{
+  "collectionHours": 24,
+  "countries": {
+    "lt": {
+      "source": "PIGU",
+      "subSource": "pigu_lt"
+    },
+    "lv": {
+      "source": "PIGU",
+      "subSource": "pigu_lv"
+    },
+    "ee": {
+      "source": "PIGU",
+      "subSource": "pigu_ee"
+    },
+    "fi": {
+      "source": "PIGU",
+      "subSource": "pigu_fi"
+    }
+  },
+  "discountRules": {
+    "PIGU_10": 10,
+    "PIGU_15": 15,
+    "PIGU_20": 20
+  }
+}
