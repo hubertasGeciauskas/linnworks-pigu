@@ -28,13 +28,6 @@ export interface StockLevel {
   Available: number;
 }
 
-export interface ChannelListing {
-  SKU: string;
-  Price: number;
-  Source: string;
-  SubSource: string;
-}
-
 interface AuthResponse {
   Token: string;
   Server: string;
@@ -54,18 +47,6 @@ interface RawStockItem {
   IsVariationGroup?: boolean;
 }
 
-interface RawListing {
-  SKU: string;
-  Price: number;
-  Source: string;
-  SubSource: string;
-}
-
-interface GetListingsResponse {
-  Items?: RawListing[];
-  Data?: RawListing[];
-}
-
 interface RawStockLevel {
   StockItemId: string;
   Available?: number;
@@ -74,10 +55,8 @@ interface RawStockLevel {
 
 export class LinnworksClient {
   private session: AxiosInstance;
-  private server: string;
 
   private constructor(server: string, token: string) {
-    this.server = server;
     this.session = axios.create({
       baseURL: server,
       headers: {
@@ -89,23 +68,30 @@ export class LinnworksClient {
 
   static async authenticate(config: LinnworksConfig): Promise<LinnworksClient> {
     console.log("Authenticating with Linnworks...");
+
     const params = new URLSearchParams({
       applicationId: config.applicationId,
       applicationSecret: config.applicationSecret,
       token: config.token,
     });
 
-    const response = await axios.post<AuthResponse>(LINNWORKS_AUTH_URL, params.toString(), {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
+    const response = await axios.post<AuthResponse>(
+      LINNWORKS_AUTH_URL,
+      params.toString(),
+      {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }
+    );
 
     const { Token, Server } = response.data;
     console.log(`Authenticated. Server: ${Server}`);
+
     return new LinnworksClient(Server, Token);
   }
 
   async getAllStockItems(): Promise<StockItem[]> {
     console.log("Fetching all stock items from Linnworks...");
+
     const pageSize = 200;
     let pageNumber = 1;
     let totalFetched = 0;
@@ -157,6 +143,7 @@ export class LinnworksClient {
 
       totalFetched += Items.length;
       console.log(`  Fetched ${totalFetched} / ${totalItems} items`);
+
       pageNumber++;
 
       if (Items.length === 0) break;
@@ -168,11 +155,13 @@ export class LinnworksClient {
 
   async getStockLevels(stockItemIds: string[]): Promise<Map<string, number>> {
     console.log(`Fetching stock levels for ${stockItemIds.length} items...`);
+
     const batchSize = 200;
     const levelMap = new Map<string, number>();
 
     for (let i = 0; i < stockItemIds.length; i += batchSize) {
       const batch = stockItemIds.slice(i, i + batchSize);
+
       const params = new URLSearchParams({
         stockItemIds: JSON.stringify(batch),
       });
@@ -187,61 +176,55 @@ export class LinnworksClient {
         levelMap.set(level.StockItemId, Math.max(0, qty));
       }
 
-      console.log(`  Stock levels: ${Math.min(i + batchSize, stockItemIds.length)} / ${stockItemIds.length}`);
+      console.log(
+        `  Stock levels: ${Math.min(i + batchSize, stockItemIds.length)} / ${stockItemIds.length}`
+      );
     }
 
     return levelMap;
   }
 
   async getChannelListings(source: string, subSource: string): Promise<Map<string, number>> {
-    console.log(`Fetching channel listings for ${source} / ${subSource}...`);
-    const pageSize = 500;
-    let pageNumber = 1;
+    console.log(`Fetching channel prices for ${source} / ${subSource}...`);
+
     const priceMap = new Map<string, number>();
-    let keepFetching = true;
 
-    while (keepFetching) {
-      const params = new URLSearchParams({
-        request: JSON.stringify({
-          Source: source,
-          SubSource: subSource,
-          PageNumber: pageNumber,
-          EntriesPerPage: pageSize,
-        }),
-      });
+    const params = new URLSearchParams({
+      request: JSON.stringify({
+        Source: source,
+        SubSource: subSource,
+      }),
+    });
 
-      const response = await this.session.post<GetListingsResponse | RawListing[]>(
-        "/api/Listings/GetListingsBySource",
-        params.toString()
-      );
+    const response = await this.session.post<any>(
+      "/api/Inventory/GetInventoryItemPriceRulesBySource",
+      params.toString()
+    );
 
-      let items: RawListing[] = [];
-      const data = response.data;
+    const data = response.data;
+    const items = Array.isArray(data) ? data : data.Items ?? data.Data ?? [];
 
-      if (Array.isArray(data)) {
-        items = data;
-      } else if (data && "Items" in data && Array.isArray(data.Items)) {
-        items = data.Items;
-      } else if (data && "Data" in data && Array.isArray(data.Data)) {
-        items = data.Data;
-      }
+    for (const item of items) {
+      const sku =
+        item.SKU ??
+        item.ItemNumber ??
+        item.StockItemSKU ??
+        item.StockItemId;
 
-      for (const listing of items) {
-        if (listing.SKU) {
-          priceMap.set(listing.SKU, listing.Price ?? 0);
-        }
-      }
+      const price =
+        item.Price ??
+        item.MainPrice ??
+        item.RulePrice ??
+        item.Value ??
+        0;
 
-      console.log(`  ${source}/${subSource}: page ${pageNumber}, got ${items.length} listings`);
-
-      if (items.length < pageSize) {
-        keepFetching = false;
-      } else {
-        pageNumber++;
+      if (sku) {
+        priceMap.set(String(sku), Number(price));
       }
     }
 
-    console.log(`  Total listings for ${subSource}: ${priceMap.size}`);
+    console.log(`  Total prices for ${source}/${subSource}: ${priceMap.size}`);
+
     return priceMap;
   }
 }
