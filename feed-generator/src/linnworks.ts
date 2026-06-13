@@ -13,6 +13,14 @@ export interface StockLevelInfo {
   StockLevel?: number;
 }
 
+export interface ChannelPriceInfo {
+  Source?: string;
+  SubSource?: string;
+  Price?: number;
+  Tag?: string | null;
+  StockItemId?: string;
+}
+
 export interface StockItem {
   StockItemId: string;
   ItemNumber: string;
@@ -20,6 +28,7 @@ export interface StockItem {
   Tags: string | null;
   RetailPrice: number;
   StockLevels: StockLevelInfo[];
+  ItemChannelPrices: ChannelPriceInfo[];
   Variations: StockVariation[];
 }
 
@@ -30,6 +39,7 @@ export interface StockVariation {
   Tags: string | null;
   RetailPrice: number;
   StockLevels: StockLevelInfo[];
+  ItemChannelPrices: ChannelPriceInfo[];
 }
 
 interface AuthResponse {
@@ -42,13 +52,22 @@ interface RawStockLevel {
   StockLevel?: number;
 }
 
+interface RawChannelPrice {
+  Source?: string;
+  SubSource?: string;
+  Price?: number;
+  Tag?: string | null;
+  StockItemId?: string;
+}
+
 interface RawStockItem {
   StockItemId: string;
   ItemNumber: string;
-  BarcodeNumber: string;
+  BarcodeNumber?: string;
   Tags?: string | null;
   RetailPrice?: number;
   StockLevels?: RawStockLevel[];
+  ItemChannelPrices?: RawChannelPrice[];
   ChildItems?: RawStockItem[];
   IsVariationGroup?: boolean;
   IsVariationParent?: boolean;
@@ -101,6 +120,8 @@ export class LinnworksClient {
       params.append("loadVariationParents", "false");
       params.append("entriesPerPage", String(pageSize));
       params.append("pageNumber", String(pageNumber));
+
+      // Keep numeric values because this format already works in your account.
       params.append("dataRequirements", JSON.stringify([0, 1, 4, 8]));
       params.append("searchTypes", JSON.stringify([0, 1, 2]));
 
@@ -114,7 +135,11 @@ export class LinnworksClient {
       console.log(`  Page ${pageNumber}: ${items.length} items`);
 
       for (const raw of items) {
-        if ((raw.IsVariationGroup || raw.IsVariationParent) && raw.ChildItems && raw.ChildItems.length > 0) {
+        if (
+          (raw.IsVariationGroup || raw.IsVariationParent) &&
+          raw.ChildItems &&
+          raw.ChildItems.length > 0
+        ) {
           for (const child of raw.ChildItems) {
             allItems.push(this.mapStockItem(child));
           }
@@ -145,6 +170,38 @@ export class LinnworksClient {
     }, 0);
   }
 
+  getChannelPrice(item: StockItem, source: string, subSource: string): number | null {
+    const match = item.ItemChannelPrices.find(
+      (price) => price.Source === source && price.SubSource === subSource
+    );
+
+    if (!match || match.Price === undefined || match.Price === null) {
+      return null;
+    }
+
+    return Number(match.Price);
+  }
+
+  logChannelPrices(item: StockItem): void {
+    console.log(`\nChannel price diagnostic for SKU: ${item.ItemNumber}`);
+    console.log(`StockItemId: ${item.StockItemId}`);
+    console.log(`RetailPrice: ${item.RetailPrice}`);
+    console.log(`ItemChannelPrices count: ${item.ItemChannelPrices.length}`);
+
+    if (item.ItemChannelPrices.length === 0) {
+      console.log("  No ItemChannelPrices returned for this SKU.");
+      return;
+    }
+
+    for (const price of item.ItemChannelPrices) {
+      console.log(
+        `  Source: ${price.Source ?? ""} | SubSource: ${price.SubSource ?? ""} | Price: ${
+          price.Price ?? ""
+        } | Tag: ${price.Tag ?? ""}`
+      );
+    }
+  }
+
   private mapStockItem(raw: RawStockItem): StockItem {
     return {
       StockItemId: raw.StockItemId,
@@ -153,12 +210,16 @@ export class LinnworksClient {
       Tags: raw.Tags ?? null,
       RetailPrice: Number(raw.RetailPrice ?? 0),
       StockLevels: raw.StockLevels ?? [],
+      ItemChannelPrices: raw.ItemChannelPrices ?? [],
       Variations: [],
     };
   }
 
   async getChannelListings(source: string, subSource: string): Promise<Map<string, number>> {
-    console.log(`Channel pricing disabled for now. Using RetailPrice instead of ${source}/${subSource}.`);
+    console.log(
+      `getChannelListings is disabled. Channel prices should be read from each StockItem.ItemChannelPrices. Requested: ${source}/${subSource}`
+    );
+
     return new Map<string, number>();
   }
 }
