@@ -99,16 +99,12 @@ export class LinnworksClient {
     const allItems: StockItem[] = [];
 
     while (totalFetched < totalItems) {
-      const params = new URLSearchParams({
-      request: JSON.stringify({
-  keyword: "",
-  loadCompositeParents: false,
-  loadVariationParents: true,
-  entriesPerPage: pageSize,
-  pageNumber,
-  dataRequirements: ["StockLevels", "Images", "Categories", "ExtendedProperties"],
-  searchTypes: ["SKU", "Title", "Barcode"],
-}),
+  const params = new URLSearchParams({
+  request: JSON.stringify({
+    keyword: "",
+    entriesPerPage: pageSize,
+    pageNumber
+  }),
       });
 
       const response = await this.session.post<GetStockItemsResponse>(
