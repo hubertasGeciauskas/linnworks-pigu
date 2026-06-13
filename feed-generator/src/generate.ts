@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { LinnworksClient } from "./linnworks.js";
+import { LinnworksClient, type StockItem } from "./linnworks.js";
 import { buildXml, type ProductEntry } from "./xml-builder.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -68,6 +68,17 @@ function applyDiscount(price: number, tags: string[], discountRules: Record<stri
   return price;
 }
 
+function getAvailableStock(item: StockItem): number {
+  if (!item.StockLevels || item.StockLevels.length === 0) {
+    return 0;
+  }
+
+  return item.StockLevels.reduce((sum, level) => {
+    const qty = level.Available ?? level.StockLevel ?? 0;
+    return sum + Math.max(0, Number(qty));
+  }, 0);
+}
+
 async function main() {
   console.log("=== Pigu / Octopia Feed Generator ===\n");
 
@@ -104,48 +115,25 @@ async function main() {
 
   console.log(`Products selected for feed: ${stockItems.length}`);
 
-  const stockLevelMap = await client.getStockLevels(stockItems.map((item) => item.StockItemId));
-
   const products: ProductEntry[] = [];
-  let missingPriceCount = 0;
 
   for (const item of stockItems) {
     const sku = item.ItemNumber ?? "";
     const ean = item.BarcodeNumber ?? "";
     const tags = parseItemTags(item.Tags);
-    const stockQty = stockLevelMap.get(item.StockItemId) ?? 0;
+    const stockQty = getAvailableStock(item);
+    const retailPrice = Number(item.RetailPrice ?? 0);
 
     console.log(`\nProduct: ${sku}`);
     console.log(`StockItemId: ${item.StockItemId}`);
-
-    const inventoryPrices = await client.getInventoryItemPrices(item.StockItemId);
-
-    console.log(`Returned price records: ${inventoryPrices.length}`);
-
-    for (const priceRecord of inventoryPrices) {
-      console.log(
-        `  Price record → Source: ${priceRecord.Source}, SubSource: ${priceRecord.SubSource}, Price: ${priceRecord.Price}, Tag: ${priceRecord.Tag ?? ""}`
-      );
-    }
+    console.log(`EAN: ${ean}`);
+    console.log(`RetailPrice: ${retailPrice}`);
+    console.log(`Stock: ${stockQty}`);
 
     const prices: ProductEntry["prices"] = {};
 
     for (const country of countries) {
-      const { source, subSource } = config.countries[country]!;
-
-      const match = inventoryPrices.find(
-        (p) => p.Source === source && p.SubSource === subSource
-      );
-
-      const beforeDiscount = match ? Number(match.Price) : 0;
-
-      if (!match) {
-        missingPriceCount++;
-        console.warn(`  Missing price for ${country}: ${source} / ${subSource}`);
-      } else {
-        console.log(`  Matched ${country}: ${source} / ${subSource} = ${beforeDiscount}`);
-      }
-
+      const beforeDiscount = retailPrice;
       const afterDiscount = applyDiscount(beforeDiscount, tags, config.discountRules);
 
       prices[country] = {
@@ -173,7 +161,6 @@ async function main() {
 
   console.log("\n=== Summary ===");
   console.log(`Products exported: ${products.length}`);
-  console.log(`Missing price count: ${missingPriceCount}`);
   console.log(`Feed written to: ${outputPath}`);
 }
 
