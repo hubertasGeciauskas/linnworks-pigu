@@ -23,15 +23,13 @@ function loadConfig(): Config {
 }
 
 function loadInputSkus(): string[] {
-  const path = resolve(ROOT, "input-skus.txt");
-
   try {
-    return readFileSync(path, "utf-8")
+    return readFileSync(resolve(ROOT, "input-skus.txt"), "utf-8")
       .split(/\r?\n/)
       .map((sku) => sku.trim())
       .filter(Boolean);
   } catch {
-    console.log("No input-skus.txt found. Using all products.");
+    console.log("No input-skus.txt found. Exporting all products.");
     return [];
   }
 }
@@ -50,29 +48,19 @@ function getLinnworksCredentials() {
 
 function parseItemTags(rawTags: string | null): string[] {
   if (!rawTags) return [];
-
-  return rawTags
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+  return rawTags.split(",").map((tag) => tag.trim()).filter(Boolean);
 }
 
 function applyDiscount(price: number, tags: string[], discountRules: Record<string, number>): number {
   for (const tag of tags) {
     if (tag in discountRules) {
-      const pct = discountRules[tag]!;
-      return Number((price * (1 - pct / 100)).toFixed(2));
+      return Number((price * (1 - discountRules[tag]! / 100)).toFixed(2));
     }
   }
-
   return price;
 }
 
 function getAvailableStock(item: StockItem): number {
-  if (!item.StockLevels || item.StockLevels.length === 0) {
-    return 0;
-  }
-
   return item.StockLevels.reduce((sum, level) => {
     const qty = level.Available ?? level.StockLevel ?? 0;
     return sum + Math.max(0, Number(qty));
@@ -86,18 +74,7 @@ async function main() {
   const countries = Object.keys(config.countries);
   const inputSkus = loadInputSkus();
 
-  console.log(`Countries: ${countries.join(", ")}`);
-  console.log(`Collection hours: ${config.collectionHours}`);
-  console.log(`Discount rules: ${JSON.stringify(config.discountRules)}`);
-
-  if (inputSkus.length > 0) {
-    console.log(`Input SKU mode enabled. SKUs: ${inputSkus.join(", ")}`);
-  } else {
-    console.log("Input SKU mode disabled. Exporting all products.");
-  }
-
   const client = await LinnworksClient.authenticate(getLinnworksCredentials());
-
   const allStockItems = await client.getAllStockItems();
 
   const stockItems =
@@ -105,63 +82,39 @@ async function main() {
       ? allStockItems.filter((item) => inputSkus.includes(item.ItemNumber))
       : allStockItems;
 
-  const foundSkus = new Set(stockItems.map((item) => item.ItemNumber));
-
-  for (const sku of inputSkus) {
-    if (!foundSkus.has(sku)) {
-      console.warn(`WARNING: SKU not found in Linnworks inventory: ${sku}`);
-    }
-  }
-
-  console.log(`Products selected for feed: ${stockItems.length}`);
-
   const products: ProductEntry[] = [];
-  let missingChannelPriceCount = 0;
+  const skippedProducts: string[] = [];
 
   for (const baseItem of stockItems) {
     const item = await client.enrichWithInventoryPrices(baseItem);
-
-    client.logChannelPrices(item);
 
     const sku = item.ItemNumber ?? "";
     const ean = item.BarcodeNumber ?? "";
     const tags = parseItemTags(item.Tags);
     const stockQty = getAvailableStock(item);
 
-    console.log(`\nProduct: ${sku}`);
-    console.log(`StockItemId: ${item.StockItemId}`);
-    console.log(`EAN: ${ean}`);
-    console.log(`Stock: ${stockQty}`);
-
     const prices: ProductEntry["prices"] = {};
+    let hasAllPrices = true;
 
     for (const country of countries) {
       const { source, subSource } = config.countries[country]!;
       const channelPrice = client.getChannelPrice(item, source, subSource);
 
       if (channelPrice === null) {
-        missingChannelPriceCount++;
-        console.warn(`Missing channel price for ${sku} / ${country}: ${source} / ${subSource}`);
-
-        prices[country] = {
-          beforeDiscount: 0,
-          afterDiscount: 0,
-        };
-
-        continue;
+        hasAllPrices = false;
+        console.warn(`Skipping ${sku}: missing ${country} price for ${source} / ${subSource}`);
+        break;
       }
 
-      const beforeDiscount = channelPrice;
-      const afterDiscount = applyDiscount(beforeDiscount, tags, config.discountRules);
-
-      console.log(
-        `Matched price for ${sku} / ${country}: ${source} / ${subSource} = ${beforeDiscount}`
-      );
-
       prices[country] = {
-        beforeDiscount,
-        afterDiscount,
+        beforeDiscount: channelPrice,
+        afterDiscount: applyDiscount(channelPrice, tags, config.discountRules),
       };
+    }
+
+    if (!hasAllPrices) {
+      skippedProducts.push(sku);
+      continue;
     }
 
     products.push({
@@ -173,18 +126,27 @@ async function main() {
     });
   }
 
-  const xml = buildXml(products, countries);
-
   const outputDir = resolve(ROOT, "public");
   mkdirSync(outputDir, { recursive: true });
 
-  const outputPath = resolve(outputDir, "feed.xml");
-  writeFileSync(outputPath, xml, "utf-8");
+  writeFileSync(resolve(outputDir, "feed.xml"), buildXml(products, countries), "utf-8");
+
+  const status = {
+    generatedAt: new Date().toISOString(),
+    inputSkuMode: inputSkus.length > 0,
+    inputSkuCount: inputSkus.length,
+    productsSelected: stockItems.length,
+    productsExported: products.length,
+    productsSkipped: skippedProducts.length,
+    skippedSkus: skippedProducts,
+  };
+
+  writeFileSync(resolve(outputDir, "status.json"), JSON.stringify(status, null, 2), "utf-8");
 
   console.log("\n=== Summary ===");
+  console.log(`Products selected: ${stockItems.length}`);
   console.log(`Products exported: ${products.length}`);
-  console.log(`Missing channel price count: ${missingChannelPriceCount}`);
-  console.log(`Feed written to: ${outputPath}`);
+  console.log(`Products skipped: ${skippedProducts.length}`);
 }
 
 main().catch((error) => {
