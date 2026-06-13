@@ -1,50 +1,60 @@
 name: Generate Pigu Feed
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 */3 * * *"
+workflow_dispatch:
+schedule:
+- cron: "0 */3 * * *"
 
 permissions:
-  contents: write
+contents: write
 
 jobs:
-  generate:
-    runs-on: ubuntu-latest
+generate:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+```
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+  - name: Set up Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: "20"
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: "9"
+  - name: Install pnpm
+    uses: pnpm/action-setup@v4
+    with:
+      version: "9"
 
-      - name: Install dependencies
-        working-directory: feed-generator
-        run: pnpm install
+  - name: Install dependencies
+    working-directory: feed-generator
+    run: pnpm install
 
-      - name: Generate XML feed
-        working-directory: feed-generator
-        env:
-          LINNWORKS_APP_ID: ${{ secrets.LINNWORKS_APP_ID }}
-          LINNWORKS_APP_SECRET: ${{ secrets.LINNWORKS_APP_SECRET }}
-          LINNWORKS_TOKEN: ${{ secrets.LINNWORKS_TOKEN }}
-        run: pnpm run generate
+  - name: Generate XML feed
+    working-directory: feed-generator
+    env:
+      LINNWORKS_APP_ID: ${{ secrets.LINNWORKS_APP_ID }}
+      LINNWORKS_APP_SECRET: ${{ secrets.LINNWORKS_APP_SECRET }}
+      LINNWORKS_TOKEN: ${{ secrets.LINNWORKS_TOKEN }}
+    run: pnpm run generate
 
-      - name: Copy feed to root for GitHub Pages
-        run: cp feed-generator/public/feed.xml feed.xml
+  - name: Copy feed files to root for GitHub Pages
+    run: |
+      cp feed-generator/public/feed.xml feed.xml
+      cp feed-generator/public/status.json status.json
 
-      - name: Commit and push feed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add feed-generator/public/feed.xml feed.xml
-          git diff --cached --quiet || git commit -m "chore: update feed.xml"
-          git push
+  - name: Commit and push feed
+    run: |
+      git config user.name "github-actions[bot]"
+      git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      git add \
+        feed-generator/public/feed.xml \
+        feed-generator/public/status.json \
+        feed.xml \
+        status.json
+
+      git diff --cached --quiet || git commit -m "chore: update feed files"
+      git push
+```
