@@ -99,13 +99,15 @@ export class LinnworksClient {
     const allItems: StockItem[] = [];
 
     while (totalFetched < totalItems) {
-  const params = new URLSearchParams({
-  request: JSON.stringify({
-    keyword: "",
-    entriesPerPage: pageSize,
-    pageNumber
-  }),
-      });
+      const params = new URLSearchParams();
+
+      params.append("keyword", "");
+      params.append("loadCompositeParents", "false");
+      params.append("loadVariationParents", "false");
+      params.append("entriesPerPage", String(pageSize));
+      params.append("pageNumber", String(pageNumber));
+      params.append("dataRequirements", JSON.stringify([0, 1, 4, 8]));
+      params.append("searchTypes", JSON.stringify([0, 1, 2]));
 
       const response = await this.session.post<GetStockItemsResponse>(
         "/api/Stock/GetStockItemsFull",
@@ -201,18 +203,8 @@ export class LinnworksClient {
     const items = Array.isArray(data) ? data : data.Items ?? data.Data ?? [];
 
     for (const item of items) {
-      const sku =
-        item.SKU ??
-        item.ItemNumber ??
-        item.StockItemSKU ??
-        item.StockItemId;
-
-      const price =
-        item.Price ??
-        item.MainPrice ??
-        item.RulePrice ??
-        item.Value ??
-        0;
+      const sku = item.SKU ?? item.ItemNumber ?? item.StockItemSKU ?? item.StockItemId;
+      const price = item.Price ?? item.MainPrice ?? item.RulePrice ?? item.Value ?? 0;
 
       if (sku) {
         priceMap.set(String(sku), Number(price));
