@@ -126,7 +126,7 @@ async function main() {
     });
   }
 
-  const outputDir = resolve(ROOT, "public");
+  const outputDir = ROOT;
   mkdirSync(outputDir, { recursive: true });
 
   writeFileSync(resolve(outputDir, "feed.xml"), buildXml(products, countries), "utf-8");
