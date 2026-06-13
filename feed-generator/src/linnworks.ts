@@ -89,7 +89,7 @@ export class LinnworksClient {
   async getAllStockItems(): Promise<StockItem[]> {
     console.log("Fetching all stock items from Linnworks...");
 
-    const pageSize = 500;
+    const pageSize = 200;
     let pageNumber = 1;
     const allItems: StockItem[] = [];
 
