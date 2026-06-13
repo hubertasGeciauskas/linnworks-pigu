@@ -34,8 +34,10 @@ interface AuthResponse {
 }
 
 interface GetStockItemsResponse {
-  Items: RawStockItem[];
-  TotalItems: number;
+  Items?: RawStockItem[];
+  Data?: RawStockItem[];
+  TotalItems?: number;
+  TotalResults?: number;
 }
 
 interface RawStockItem {
@@ -109,15 +111,37 @@ export class LinnworksClient {
       params.append("dataRequirements", JSON.stringify([0, 1, 4, 8]));
       params.append("searchTypes", JSON.stringify([0, 1, 2]));
 
-      const response = await this.session.post<GetStockItemsResponse>(
+      const response = await this.session.post<GetStockItemsResponse | RawStockItem[]>(
         "/api/Stock/GetStockItemsFull",
         params.toString()
       );
 
-      const { Items, TotalItems } = response.data;
-      totalItems = TotalItems;
+      console.log("GetStockItemsFull raw response:");
+      console.log(JSON.stringify(response.data, null, 2).slice(0, 3000));
 
-      for (const raw of Items) {
+      const data = response.data;
+
+      let items: RawStockItem[] = [];
+      let detectedTotalItems: number | undefined;
+
+      if (Array.isArray(data)) {
+        items = data;
+        detectedTotalItems = data.length;
+      } else if (data && Array.isArray(data.Items)) {
+        items = data.Items;
+        detectedTotalItems = data.TotalItems ?? data.TotalResults ?? data.Items.length;
+      } else if (data && Array.isArray(data.Data)) {
+        items = data.Data;
+        detectedTotalItems = data.TotalItems ?? data.TotalResults ?? data.Data.length;
+      } else {
+        console.warn("Unexpected GetStockItemsFull response format.");
+        console.warn("Stopping stock item fetch to avoid crash.");
+        break;
+      }
+
+      totalItems = detectedTotalItems ?? items.length;
+
+      for (const raw of items) {
         if (raw.IsVariationGroup && raw.ChildItems && raw.ChildItems.length > 0) {
           for (const child of raw.ChildItems) {
             allItems.push({
@@ -139,12 +163,14 @@ export class LinnworksClient {
         }
       }
 
-      totalFetched += Items.length;
+      totalFetched += items.length;
       console.log(`  Fetched ${totalFetched} / ${totalItems} items`);
 
       pageNumber++;
 
-      if (Items.length === 0) break;
+      if (items.length === 0 || items.length < pageSize) {
+        break;
+      }
     }
 
     console.log(`Total stock items fetched: ${allItems.length}`);
@@ -168,9 +194,6 @@ export class LinnworksClient {
         "/api/Stock/GetStockLevel",
         params.toString()
       );
-
-      console.log("GetStockItemsFull raw response:");
-console.log(JSON.stringify(response.data, null, 2).slice(0, 3000));
 
       for (const level of response.data) {
         const qty = level.Available ?? level.StockLevel ?? 0;
