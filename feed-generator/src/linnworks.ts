@@ -169,6 +169,9 @@ export class LinnworksClient {
         params.toString()
       );
 
+      console.log("GetStockItemsFull raw response:");
+console.log(JSON.stringify(response.data, null, 2).slice(0, 3000));
+
       for (const level of response.data) {
         const qty = level.Available ?? level.StockLevel ?? 0;
         levelMap.set(level.StockItemId, Math.max(0, qty));
