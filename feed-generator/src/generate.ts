@@ -19,9 +19,21 @@ interface Config {
 }
 
 function loadConfig(): Config {
-  const configPath = resolve(ROOT, "config.json");
-  const raw = readFileSync(configPath, "utf-8");
-  return JSON.parse(raw) as Config;
+  return JSON.parse(readFileSync(resolve(ROOT, "config.json"), "utf-8")) as Config;
+}
+
+function loadInputSkus(): string[] {
+  const path = resolve(ROOT, "input-skus.txt");
+
+  try {
+    return readFileSync(path, "utf-8")
+      .split(/\r?\n/)
+      .map((sku) => sku.trim())
+      .filter(Boolean);
+  } catch {
+    console.log("No input-skus.txt found. Using all products.");
+    return [];
+  }
 }
 
 function getLinnworksCredentials() {
@@ -30,14 +42,7 @@ function getLinnworksCredentials() {
   const token = process.env["LINNWORKS_TOKEN"];
 
   if (!applicationId || !applicationSecret || !token) {
-    console.error(
-      "Missing required environment variables:\n" +
-        "  LINNWORKS_APP_ID\n" +
-        "  LINNWORKS_APP_SECRET\n" +
-        "  LINNWORKS_TOKEN\n\n" +
-        "Set these in GitHub Secrets (for CI) or as local environment variables."
-    );
-    process.exit(1);
+    throw new Error("Missing Linnworks environment variables.");
   }
 
   return { applicationId, applicationSecret, token };
@@ -45,9 +50,10 @@ function getLinnworksCredentials() {
 
 function parseItemTags(rawTags: string | null): string[] {
   if (!rawTags) return [];
+
   return rawTags
     .split(",")
-    .map((t) => t.trim())
+    .map((tag) => tag.trim())
     .filter(Boolean);
 }
 
@@ -55,9 +61,10 @@ function applyDiscount(price: number, tags: string[], discountRules: Record<stri
   for (const tag of tags) {
     if (tag in discountRules) {
       const pct = discountRules[tag]!;
-      return parseFloat((price * (1 - pct / 100)).toFixed(2));
+      return Number((price * (1 - pct / 100)).toFixed(2));
     }
   }
+
   return price;
 }
 
@@ -65,34 +72,42 @@ async function main() {
   console.log("=== Pigu / Octopia Feed Generator ===\n");
 
   const config = loadConfig();
-  const credentials = getLinnworksCredentials();
   const countries = Object.keys(config.countries);
+  const inputSkus = loadInputSkus();
 
   console.log(`Countries: ${countries.join(", ")}`);
   console.log(`Collection hours: ${config.collectionHours}`);
-  console.log(`Discount rules: ${JSON.stringify(config.discountRules)}\n`);
+  console.log(`Discount rules: ${JSON.stringify(config.discountRules)}`);
 
-  const client = await LinnworksClient.authenticate(credentials);
+  if (inputSkus.length > 0) {
+    console.log(`Input SKU mode enabled. SKUs: ${inputSkus.join(", ")}`);
+  } else {
+    console.log("Input SKU mode disabled. Exporting all products.");
+  }
 
-  const [stockItems, ...channelPriceMaps] = await Promise.all([
-    client.getAllStockItems(),
-    ...countries.map((country) => {
-      const { source, subSource } = config.countries[country]!;
-      return client.getChannelListings(source, subSource);
-    }),
-  ]);
+  const client = await LinnworksClient.authenticate(getLinnworksCredentials());
 
-  const countryPriceMap: Record<string, Map<string, number>> = {};
-  countries.forEach((country, idx) => {
-    countryPriceMap[country] = channelPriceMaps[idx]!;
-  });
+  const allStockItems = await client.getAllStockItems();
 
-  const stockItemIds = stockItems.map((item) => item.StockItemId);
-  const stockLevelMap = await client.getStockLevels(stockItemIds);
+  const stockItems =
+    inputSkus.length > 0
+      ? allStockItems.filter((item) => inputSkus.includes(item.ItemNumber))
+      : allStockItems;
 
-  console.log("\nBuilding XML feed...");
+  const foundSkus = new Set(stockItems.map((item) => item.ItemNumber));
+
+  for (const sku of inputSkus) {
+    if (!foundSkus.has(sku)) {
+      console.warn(`WARNING: SKU not found in Linnworks inventory: ${sku}`);
+    }
+  }
+
+  console.log(`Products selected for feed: ${stockItems.length}`);
+
+  const stockLevelMap = await client.getStockLevels(stockItems.map((item) => item.StockItemId));
 
   const products: ProductEntry[] = [];
+  let missingPriceCount = 0;
 
   for (const item of stockItems) {
     const sku = item.ItemNumber ?? "";
@@ -100,12 +115,43 @@ async function main() {
     const tags = parseItemTags(item.Tags);
     const stockQty = stockLevelMap.get(item.StockItemId) ?? 0;
 
+    console.log(`\nProduct: ${sku}`);
+    console.log(`StockItemId: ${item.StockItemId}`);
+
+    const inventoryPrices = await client.getInventoryItemPrices(item.StockItemId);
+
+    console.log(`Returned price records: ${inventoryPrices.length}`);
+
+    for (const priceRecord of inventoryPrices) {
+      console.log(
+        `  Price record → Source: ${priceRecord.Source}, SubSource: ${priceRecord.SubSource}, Price: ${priceRecord.Price}, Tag: ${priceRecord.Tag ?? ""}`
+      );
+    }
+
     const prices: ProductEntry["prices"] = {};
+
     for (const country of countries) {
-      const priceMap = countryPriceMap[country]!;
-      const beforeDiscount = priceMap.get(sku) ?? 0;
+      const { source, subSource } = config.countries[country]!;
+
+      const match = inventoryPrices.find(
+        (p) => p.Source === source && p.SubSource === subSource
+      );
+
+      const beforeDiscount = match ? Number(match.Price) : 0;
+
+      if (!match) {
+        missingPriceCount++;
+        console.warn(`  Missing price for ${country}: ${source} / ${subSource}`);
+      } else {
+        console.log(`  Matched ${country}: ${source} / ${subSource} = ${beforeDiscount}`);
+      }
+
       const afterDiscount = applyDiscount(beforeDiscount, tags, config.discountRules);
-      prices[country] = { beforeDiscount, afterDiscount };
+
+      prices[country] = {
+        beforeDiscount,
+        afterDiscount,
+      };
     }
 
     products.push({
@@ -117,21 +163,21 @@ async function main() {
     });
   }
 
-  console.log(`Total products in feed: ${products.length}`);
-
   const xml = buildXml(products, countries);
 
   const outputDir = resolve(ROOT, "public");
   mkdirSync(outputDir, { recursive: true });
+
   const outputPath = resolve(outputDir, "feed.xml");
   writeFileSync(outputPath, xml, "utf-8");
 
-  console.log(`\nFeed written to: ${outputPath}`);
-  console.log(`Feed size: ${(xml.length / 1024).toFixed(1)} KB`);
-  console.log("\nDone.");
+  console.log("\n=== Summary ===");
+  console.log(`Products exported: ${products.length}`);
+  console.log(`Missing price count: ${missingPriceCount}`);
+  console.log(`Feed written to: ${outputPath}`);
 }
 
-main().catch((err: unknown) => {
-  console.error("Feed generation failed:", err);
+main().catch((error) => {
+  console.error("Feed generation failed:", error);
   process.exit(1);
 });
