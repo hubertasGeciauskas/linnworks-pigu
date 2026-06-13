@@ -120,8 +120,6 @@ export class LinnworksClient {
       params.append("loadVariationParents", "false");
       params.append("entriesPerPage", String(pageSize));
       params.append("pageNumber", String(pageNumber));
-
-      // Keep numeric values because this format already works in your account.
       params.append("dataRequirements", JSON.stringify([0, 1, 4, 8]));
       params.append("searchTypes", JSON.stringify([0, 1, 2]));
 
@@ -157,6 +155,32 @@ export class LinnworksClient {
 
     console.log(`Total stock items fetched: ${allItems.length}`);
     return allItems;
+  }
+
+  async getInventoryItemPrices(stockItemId: string): Promise<ChannelPriceInfo[]> {
+    console.log(`Fetching inventory item prices for StockItemId: ${stockItemId}`);
+
+    const params = new URLSearchParams();
+    params.append("inventoryItemId", stockItemId);
+
+    const response = await this.session.get<ChannelPriceInfo[]>(
+      "/api/Inventory/GetInventoryItemPrices",
+      {
+        params,
+      }
+    );
+
+    const data = response.data;
+    return Array.isArray(data) ? data : [];
+  }
+
+  async enrichWithInventoryPrices(item: StockItem): Promise<StockItem> {
+    const prices = await this.getInventoryItemPrices(item.StockItemId);
+
+    return {
+      ...item,
+      ItemChannelPrices: prices,
+    };
   }
 
   getAvailableStock(item: StockItem): number {
@@ -217,7 +241,7 @@ export class LinnworksClient {
 
   async getChannelListings(source: string, subSource: string): Promise<Map<string, number>> {
     console.log(
-      `getChannelListings is disabled. Channel prices should be read from each StockItem.ItemChannelPrices. Requested: ${source}/${subSource}`
+      `getChannelListings is disabled. Channel prices should be read from GetInventoryItemPrices. Requested: ${source}/${subSource}`
     );
 
     return new Map<string, number>();
