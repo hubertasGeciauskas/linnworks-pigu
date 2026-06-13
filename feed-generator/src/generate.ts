@@ -118,6 +118,8 @@ async function main() {
   const products: ProductEntry[] = [];
 
   for (const item of stockItems) {
+    client.logChannelPrices(item);
+
     const sku = item.ItemNumber ?? "";
     const ean = item.BarcodeNumber ?? "";
     const tags = parseItemTags(item.Tags);
