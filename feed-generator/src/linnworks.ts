@@ -8,11 +8,18 @@ export interface LinnworksConfig {
   token: string;
 }
 
+export interface StockLevelInfo {
+  Available?: number;
+  StockLevel?: number;
+}
+
 export interface StockItem {
   StockItemId: string;
   ItemNumber: string;
   BarcodeNumber: string;
   Tags: string | null;
+  RetailPrice: number;
+  StockLevels: StockLevelInfo[];
   Variations: StockVariation[];
 }
 
@@ -21,11 +28,8 @@ export interface StockVariation {
   ItemNumber: string;
   BarcodeNumber: string;
   Tags: string | null;
-}
-
-export interface StockLevel {
-  StockItemId: string;
-  Available: number;
+  RetailPrice: number;
+  StockLevels: StockLevelInfo[];
 }
 
 interface AuthResponse {
@@ -33,26 +37,21 @@ interface AuthResponse {
   Server: string;
 }
 
-interface GetStockItemsResponse {
-  Items?: RawStockItem[];
-  Data?: RawStockItem[];
-  TotalItems?: number;
-  TotalResults?: number;
+interface RawStockLevel {
+  Available?: number;
+  StockLevel?: number;
 }
 
 interface RawStockItem {
   StockItemId: string;
   ItemNumber: string;
   BarcodeNumber: string;
-  Tags: string | null;
+  Tags?: string | null;
+  RetailPrice?: number;
+  StockLevels?: RawStockLevel[];
   ChildItems?: RawStockItem[];
   IsVariationGroup?: boolean;
-}
-
-interface RawStockLevel {
-  StockItemId: string;
-  Available?: number;
-  StockLevel?: number;
+  IsVariationParent?: boolean;
 }
 
 export class LinnworksClient {
@@ -80,27 +79,21 @@ export class LinnworksClient {
     const response = await axios.post<AuthResponse>(
       LINNWORKS_AUTH_URL,
       params.toString(),
-      {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      }
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
-    const { Token, Server } = response.data;
-    console.log(`Authenticated. Server: ${Server}`);
-
-    return new LinnworksClient(Server, Token);
+    console.log(`Authenticated. Server: ${response.data.Server}`);
+    return new LinnworksClient(response.data.Server, response.data.Token);
   }
 
   async getAllStockItems(): Promise<StockItem[]> {
     console.log("Fetching all stock items from Linnworks...");
 
-    const pageSize = 200;
+    const pageSize = 500;
     let pageNumber = 1;
-    let totalFetched = 0;
-    let totalItems = Infinity;
     const allItems: StockItem[] = [];
 
-    while (totalFetched < totalItems) {
+    while (true) {
       const params = new URLSearchParams();
 
       params.append("keyword", "");
@@ -111,134 +104,61 @@ export class LinnworksClient {
       params.append("dataRequirements", JSON.stringify([0, 1, 4, 8]));
       params.append("searchTypes", JSON.stringify([0, 1, 2]));
 
-      const response = await this.session.post<GetStockItemsResponse | RawStockItem[]>(
+      const response = await this.session.post<RawStockItem[]>(
         "/api/Stock/GetStockItemsFull",
         params.toString()
       );
 
-      console.log("GetStockItemsFull raw response:");
-      console.log(JSON.stringify(response.data, null, 2).slice(0, 3000));
+      const items = Array.isArray(response.data) ? response.data : [];
 
-      const data = response.data;
-
-      let items: RawStockItem[] = [];
-      let detectedTotalItems: number | undefined;
-
-      if (Array.isArray(data)) {
-        items = data;
-        detectedTotalItems = data.length;
-      } else if (data && Array.isArray(data.Items)) {
-        items = data.Items;
-        detectedTotalItems = data.TotalItems ?? data.TotalResults ?? data.Items.length;
-      } else if (data && Array.isArray(data.Data)) {
-        items = data.Data;
-        detectedTotalItems = data.TotalItems ?? data.TotalResults ?? data.Data.length;
-      } else {
-        console.warn("Unexpected GetStockItemsFull response format.");
-        console.warn("Stopping stock item fetch to avoid crash.");
-        break;
-      }
-
-      totalItems = detectedTotalItems ?? items.length;
+      console.log(`  Page ${pageNumber}: ${items.length} items`);
 
       for (const raw of items) {
-        if (raw.IsVariationGroup && raw.ChildItems && raw.ChildItems.length > 0) {
+        if ((raw.IsVariationGroup || raw.IsVariationParent) && raw.ChildItems && raw.ChildItems.length > 0) {
           for (const child of raw.ChildItems) {
-            allItems.push({
-              StockItemId: child.StockItemId,
-              ItemNumber: child.ItemNumber,
-              BarcodeNumber: child.BarcodeNumber,
-              Tags: child.Tags,
-              Variations: [],
-            });
+            allItems.push(this.mapStockItem(child));
           }
         } else {
-          allItems.push({
-            StockItemId: raw.StockItemId,
-            ItemNumber: raw.ItemNumber,
-            BarcodeNumber: raw.BarcodeNumber,
-            Tags: raw.Tags,
-            Variations: [],
-          });
+          allItems.push(this.mapStockItem(raw));
         }
       }
 
-      totalFetched += items.length;
-      console.log(`  Fetched ${totalFetched} / ${totalItems} items`);
-
-      pageNumber++;
-
-      if (items.length === 0 || items.length < pageSize) {
+      if (items.length < pageSize) {
         break;
       }
+
+      pageNumber++;
     }
 
     console.log(`Total stock items fetched: ${allItems.length}`);
     return allItems;
   }
 
-  async getStockLevels(stockItemIds: string[]): Promise<Map<string, number>> {
-    console.log(`Fetching stock levels for ${stockItemIds.length} items...`);
-
-    const batchSize = 200;
-    const levelMap = new Map<string, number>();
-
-    for (let i = 0; i < stockItemIds.length; i += batchSize) {
-      const batch = stockItemIds.slice(i, i + batchSize);
-
-      const params = new URLSearchParams({
-        stockItemIds: JSON.stringify(batch),
-      });
-
-      const response = await this.session.post<RawStockLevel[]>(
-        "/api/Stock/GetStockLevel",
-        params.toString()
-      );
-
-      for (const level of response.data) {
-        const qty = level.Available ?? level.StockLevel ?? 0;
-        levelMap.set(level.StockItemId, Math.max(0, qty));
-      }
-
-      console.log(
-        `  Stock levels: ${Math.min(i + batchSize, stockItemIds.length)} / ${stockItemIds.length}`
-      );
+  getAvailableStock(item: StockItem): number {
+    if (!item.StockLevels || item.StockLevels.length === 0) {
+      return 0;
     }
 
-    return levelMap;
+    return item.StockLevels.reduce((sum, level) => {
+      const qty = level.Available ?? level.StockLevel ?? 0;
+      return sum + Math.max(0, Number(qty));
+    }, 0);
+  }
+
+  private mapStockItem(raw: RawStockItem): StockItem {
+    return {
+      StockItemId: raw.StockItemId,
+      ItemNumber: raw.ItemNumber,
+      BarcodeNumber: raw.BarcodeNumber ?? "",
+      Tags: raw.Tags ?? null,
+      RetailPrice: Number(raw.RetailPrice ?? 0),
+      StockLevels: raw.StockLevels ?? [],
+      Variations: [],
+    };
   }
 
   async getChannelListings(source: string, subSource: string): Promise<Map<string, number>> {
-    console.log(`Fetching channel prices for ${source} / ${subSource}...`);
-
-    const priceMap = new Map<string, number>();
-
-    const params = new URLSearchParams({
-      request: JSON.stringify({
-        Source: source,
-        SubSource: subSource,
-      }),
-    });
-
-    const response = await this.session.post<any>(
-      "/api/Inventory/GetInventoryItemPriceRulesBySource",
-      params.toString()
-    );
-
-    const data = response.data;
-    const items = Array.isArray(data) ? data : data.Items ?? data.Data ?? [];
-
-    for (const item of items) {
-      const sku = item.SKU ?? item.ItemNumber ?? item.StockItemSKU ?? item.StockItemId;
-      const price = item.Price ?? item.MainPrice ?? item.RulePrice ?? item.Value ?? 0;
-
-      if (sku) {
-        priceMap.set(String(sku), Number(price));
-      }
-    }
-
-    console.log(`  Total prices for ${source}/${subSource}: ${priceMap.size}`);
-
-    return priceMap;
+    console.log(`Channel pricing disabled for now. Using RetailPrice instead of ${source}/${subSource}.`);
+    return new Map<string, number>();
   }
 }
