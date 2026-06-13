@@ -116,27 +116,47 @@ async function main() {
   console.log(`Products selected for feed: ${stockItems.length}`);
 
   const products: ProductEntry[] = [];
+  let missingChannelPriceCount = 0;
 
-  for (const item of stockItems) {
+  for (const baseItem of stockItems) {
+    const item = await client.enrichWithInventoryPrices(baseItem);
+
     client.logChannelPrices(item);
 
     const sku = item.ItemNumber ?? "";
     const ean = item.BarcodeNumber ?? "";
     const tags = parseItemTags(item.Tags);
     const stockQty = getAvailableStock(item);
-    const retailPrice = Number(item.RetailPrice ?? 0);
 
     console.log(`\nProduct: ${sku}`);
     console.log(`StockItemId: ${item.StockItemId}`);
     console.log(`EAN: ${ean}`);
-    console.log(`RetailPrice: ${retailPrice}`);
     console.log(`Stock: ${stockQty}`);
 
     const prices: ProductEntry["prices"] = {};
 
     for (const country of countries) {
-      const beforeDiscount = retailPrice;
+      const { source, subSource } = config.countries[country]!;
+      const channelPrice = client.getChannelPrice(item, source, subSource);
+
+      if (channelPrice === null) {
+        missingChannelPriceCount++;
+        console.warn(`Missing channel price for ${sku} / ${country}: ${source} / ${subSource}`);
+
+        prices[country] = {
+          beforeDiscount: 0,
+          afterDiscount: 0,
+        };
+
+        continue;
+      }
+
+      const beforeDiscount = channelPrice;
       const afterDiscount = applyDiscount(beforeDiscount, tags, config.discountRules);
+
+      console.log(
+        `Matched price for ${sku} / ${country}: ${source} / ${subSource} = ${beforeDiscount}`
+      );
 
       prices[country] = {
         beforeDiscount,
@@ -163,6 +183,7 @@ async function main() {
 
   console.log("\n=== Summary ===");
   console.log(`Products exported: ${products.length}`);
+  console.log(`Missing channel price count: ${missingChannelPriceCount}`);
   console.log(`Feed written to: ${outputPath}`);
 }
 
