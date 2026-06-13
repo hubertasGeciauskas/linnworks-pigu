@@ -40,15 +40,15 @@ jobs:
 
       - name: Copy feed files to root for GitHub Pages
         run: |
-          cp feed-generator/public/feed.xml feed.xml
-          cp feed-generator/public/status.json status.json
+          cp feed-generator/feed.xml feed.xml
+          cp feed-generator/status.json status.json
 
       - name: Commit and push feed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add feed-generator/public/feed.xml feed-generator/public/status.json feed.xml status.json
+          git add feed-generator/feed.xml feed-generator/status.json feed.xml status.json
 
           git diff --cached --quiet || git commit -m "chore: update feed files"
           git push
