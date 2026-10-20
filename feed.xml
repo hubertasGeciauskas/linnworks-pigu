@@ -17,14 +17,14 @@
   <product>
     <sku>00007</sku>
     <ean></ean>
-    <price-before-discount-lt>4.10</price-before-discount-lt>
-    <price-after-discount-lt>4.10</price-after-discount-lt>
-    <price-before-discount-lv>4.10</price-before-discount-lv>
-    <price-after-discount-lv>4.10</price-after-discount-lv>
-    <price-before-discount-ee>4.10</price-before-discount-ee>
-    <price-after-discount-ee>4.10</price-after-discount-ee>
-    <price-before-discount-fi>4.10</price-before-discount-fi>
-    <price-after-discount-fi>4.10</price-after-discount-fi>
+    <price-before-discount-lt>5.39</price-before-discount-lt>
+    <price-after-discount-lt>5.39</price-after-discount-lt>
+    <price-before-discount-lv>5.39</price-before-discount-lv>
+    <price-after-discount-lv>5.39</price-after-discount-lv>
+    <price-before-discount-ee>5.39</price-before-discount-ee>
+    <price-after-discount-ee>5.39</price-after-discount-ee>
+    <price-before-discount-fi>5.39</price-before-discount-fi>
+    <price-after-discount-fi>5.39</price-after-discount-fi>
     <stock>41</stock>
     <collectionhours>24</collectionhours>
   </product>
